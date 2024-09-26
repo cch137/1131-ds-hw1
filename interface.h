@@ -8,7 +8,7 @@ void print_person(DBItem *item);
 
 // CRUD operations
 
-void create_person();
+void create_person(DBModel *person_model);
 void read_person();
 void update_person();
 void delete_person();

@@ -6,19 +6,15 @@
 #include "./cJSON.h"
 #include "./database.h"
 
-char *inputLine();
-char inputChar();
-
-void print_person(DBItem *item);
-void create_person();
-void read_person();
-void update_person();
-void delete_person();
-void main_menu();
+char *input_string();
+int input_int();
+char input_char();
+char *int_to_string(int value);
+cJSON *input_cjson(DBModel *model, int depth);
 
 #define INPUT_LINE_CHUNK_SIZE 8
 
-char *inputLine()
+char *input_string()
 {
   size_t bufferSize = INPUT_LINE_CHUNK_SIZE;
   char *buffer = malloc(bufferSize);
@@ -59,12 +55,125 @@ char *inputLine()
   return buffer;
 }
 
-char inputChar()
+int input_int()
 {
-  char *buffer = inputLine();
+  char *buffer = input_string();
+  int value = atoi(buffer);
+  free(buffer);
+  return value;
+}
+
+double input_double()
+{
+  char *buffer = input_string();
+  double value = atof(buffer);
+  free(buffer);
+  return value;
+}
+
+char input_char()
+{
+  char *buffer = input_string();
   char firstChar = buffer[0];
   free(buffer);
   return firstChar;
+}
+
+char *int_to_string(int value)
+{
+  int digit_counter = value;
+  int length = value < 0 ? 3 : 2;
+  while (digit_counter /= 10)
+    length++;
+  char *string = (char *)calloc((length), sizeof(char));
+  sprintf(string, "%d", value);
+  string[length - 1] = '\0';
+  return string;
+}
+
+cJSON *input_cjson(DBModel *model, int depth)
+{
+  switch (model->type)
+  {
+  case DBModelType_Object:
+  {
+    cJSON *object = cJSON_CreateObject();
+    int _depth = depth;
+    int length = model->length;
+    DBModel *attribute = NULL;
+
+    while (_depth--)
+      printf(_depth ? "  " : "- ");
+    printf("<Object> %s:\n", model->key);
+
+    for (int i = 0; i < length; i++)
+    {
+      attribute = model->attributes[i];
+
+      if (attribute == NULL)
+        continue;
+
+      cJSON_AddItemToObject(object, attribute->key, input_cjson(attribute, depth + 1));
+    }
+
+    return object;
+  }
+
+  case DBModelType_Array:
+  {
+    int _depth = depth;
+    char *buffer = NULL;
+    cJSON *array = cJSON_CreateArray();
+
+    while (_depth--)
+      printf(_depth ? "  " : "- ");
+    printf("<Array> %s\n", model->key);
+    _depth = depth;
+    while (_depth--)
+      printf("  ");
+    printf("length: ");
+
+    int length = input_int();
+
+    for (int i = 0; i < length; i++)
+    {
+      buffer = int_to_string(i + 1);
+      model->attributes[0]->key = buffer;
+
+      cJSON_AddItemToArray(array, input_cjson(model->attributes[0], depth + 1));
+
+      free(buffer);
+    }
+    return array;
+  }
+
+  case DBModelType_String:
+    while (depth--)
+      printf(depth ? "  " : "- ");
+    printf("<String> %s: ", model->key);
+    return cJSON_CreateString(input_string());
+
+  case DBModelType_Number:
+    while (depth--)
+      printf(depth ? "  " : "- ");
+    printf("<Number> %s: ", model->key);
+    return cJSON_CreateNumber(input_double());
+
+  case DBModelType_Boolean:
+  {
+    while (depth--)
+      printf(depth ? "  " : "- ");
+    printf("<Boolean> %s (y/n): ", model->key);
+    char choice = input_char();
+    return cJSON_CreateBool(choice == 'y' || choice == 'Y');
+  }
+
+  case DBModelType_Null:
+    return cJSON_CreateNull();
+
+  default:
+    return NULL;
+  }
 }
 
 void print_person(DBItem *item)
@@ -99,86 +208,40 @@ void print_person(DBItem *item)
   printf("----------------------------------------------------------------\n");
 }
 
-void create_person()
+void create_person(DBModel *person_model)
 {
-  char *tempString = NULL;
-  cJSON *json = cJSON_CreateObject();
+  cJSON *person_json = input_cjson(person_model, 0);
+  char *name = NULL;
 
-  printf("Enter the following details:\n");
-
-  printf("Name: ");
-  while (1)
+  if (exists(cJSON_GetObjectItem(person_json, "name")->valuestring))
   {
-    tempString = inputLine();
-    cJSON_AddStringToObject(json, "name", tempString);
-    if (!has_key(tempString))
+    while (true)
+    {
+      char *buffer = NULL;
+      printf("Person with this name already exists. Enter a different name: ");
+      buffer = input_string();
+      cJSON_ReplaceItemInObject(person_json, "name", cJSON_CreateString(buffer));
+      if (exists(buffer))
+      {
+        free(buffer);
+        continue;
+      }
+      printf("Person has been successfully created.\n");
+      set_item(buffer, person_json);
+      free(buffer);
       break;
-    printf("Name already exists. Please choose a different name.\nName: ");
-    free(tempString);
-    continue;
+    }
   }
-  // keep name for later use
-  char *name = tempString;
-
-  printf("Job Title: ");
-  tempString = inputLine();
-  cJSON_AddStringToObject(json, "jobTitle", tempString);
-  free(tempString);
-
-  printf("Age: ");
-  tempString = inputLine();
-  cJSON_AddNumberToObject(json, "age", atoi(tempString));
-  free(tempString);
-
-  printf("Address: ");
-  tempString = inputLine();
-  cJSON_AddStringToObject(json, "address", tempString);
-  free(tempString);
-
-  printf("Number of phone numbers: ");
-  tempString = inputLine();
-  int tempArrayCOunt = atoi(tempString);
-  free(tempString);
-  cJSON *phoneNumbers = cJSON_CreateArray();
-  for (int i = 0; i < tempArrayCOunt; i++)
+  else
   {
-    printf("Phone Number %d: ", i + 1);
-    tempString = inputLine();
-    cJSON_AddItemToArray(phoneNumbers, cJSON_CreateString(tempString));
-    free(tempString);
+    set_item(name, person_json);
   }
-  cJSON_AddItemToObject(json, "phoneNumbers", phoneNumbers);
-
-  printf("Number of email addresses: ");
-  tempString = inputLine();
-  tempArrayCOunt = atoi(tempString);
-  free(tempString);
-  cJSON *emailAddresses = cJSON_CreateArray();
-  for (int i = 0; i < tempArrayCOunt; i++)
-  {
-    printf("Email Address %d: ", i + 1);
-    tempString = inputLine();
-    cJSON_AddItemToArray(emailAddresses, cJSON_CreateString(tempString));
-    free(tempString);
-  }
-  cJSON_AddItemToObject(json, "emailAddresses", emailAddresses);
-
-  printf("Married (y/n): ");
-  char tempChar = inputChar();
-  cJSON_AddBoolToObject(json, "isMarried", tempChar == 'y' || tempChar == 'Y' ? true : false);
-
-  printf("Employed (y/n): ");
-  tempChar = inputChar();
-  cJSON_AddBoolToObject(json, "isEmployed", tempChar == 'y' || tempChar == 'Y' ? true : false);
-
-  create_item(name, json);
-  free(name);
 }
 
 void read_person()
 {
   printf("Enter the name of the person: ");
-  char *name = inputLine();
+  char *name = input_string();
   DBItem *item = get_item(name);
   free(name);
 
@@ -191,7 +254,7 @@ void read_person()
 void update_person()
 {
   printf("Enter the name of the person to update: ");
-  char *tempString = inputLine();
+  char *tempString = input_string();
   DBItem *item = get_item(tempString);
   free(tempString);
 
@@ -204,35 +267,39 @@ void update_person()
   cJSON *json = item->json;
 
   printf("Choose field to update:\n");
-  printf("1. Name\n");
-  printf("2. Job Title\n");
-  printf("3. Age\n");
-  printf("4. Address\n");
-  printf("5. Phone Numbers\n");
-  printf("6. Email Addresses\n");
-  printf("7. Married\n");
-  printf("8. Employed\n");
+  printf("1 - Name\n");
+  printf("2 - Job Title\n");
+  printf("3 - Age\n");
+  printf("4 - Address\n");
+  printf("5 - Phone Numbers\n");
+  printf("6 - Email Addresses\n");
+  printf("7 - Married\n");
+  printf("8 - Employed\n");
   printf("Your choice: ");
 
-  tempString = inputLine();
-  int choice = atoi(tempString);
-  free(tempString);
+  int choice = input_int();
 
   switch (choice)
   {
   case 1:
   {
     printf("Enter new name: ");
-    tempString = inputLine();
+    tempString = input_string();
+    if (exists(tempString))
+    {
+      printf("Person with this name already exists. Operation canceled.\n");
+      free(tempString);
+      break;
+    }
     cJSON_ReplaceItemInObject(json, "name", cJSON_CreateString(tempString));
-    move_item(item->key, tempString);
+    rename_item(item->key, tempString);
     free(tempString);
     break;
   }
   case 2:
   {
     printf("Enter new job title: ");
-    tempString = inputLine();
+    tempString = input_string();
     cJSON_ReplaceItemInObject(json, "jobTitle", cJSON_CreateString(tempString));
     free(tempString);
     break;
@@ -240,15 +307,13 @@ void update_person()
   case 3:
   {
     printf("Enter new age: ");
-    tempString = inputLine();
-    cJSON_ReplaceItemInObject(json, "age", cJSON_CreateNumber(atoi(tempString)));
-    free(tempString);
+    cJSON_ReplaceItemInObject(json, "age", cJSON_CreateNumber(input_int()));
     break;
   }
   case 4:
   {
     printf("Enter new address: ");
-    tempString = inputLine();
+    tempString = input_string();
     cJSON_ReplaceItemInObject(json, "address", cJSON_CreateString(tempString));
     free(tempString);
     break;
@@ -256,19 +321,19 @@ void update_person()
   case 5:
   {
     printf("Choose action to phone numbers:\n");
-    printf("1. Add\n");
-    printf("2. Remove\n");
+    printf("1 - Add\n");
+    printf("2 - Remove\n");
     printf("Your choice: ");
 
     cJSON *phoneNumbers = cJSON_GetObjectItem(json, "phoneNumbers");
     int tempArraySize = cJSON_GetArraySize(phoneNumbers);
 
-    switch (inputChar())
+    switch (input_char())
     {
     case '1':
     {
       printf("Enter new phone number: ");
-      tempString = inputLine();
+      tempString = input_string();
       cJSON_AddItemToArray(phoneNumbers, cJSON_CreateString(tempString));
       free(tempString);
       break;
@@ -283,15 +348,12 @@ void update_person()
 
       printf("Phone numbers:\n");
       for (int i = 0; i < tempArraySize; i++)
-        printf("%d. %s\n", i + 1, cJSON_GetArrayItem(phoneNumbers, i)->valuestring);
+        printf("%d) %s\n", i + 1, cJSON_GetArrayItem(phoneNumbers, i)->valuestring);
       printf("Enter the index of the phone number to remove (start with 1): ");
 
-      tempString = inputLine();
-      int index = atoi(tempString);
-      free(tempString);
-
+      int index = input_int();
       if (index >= 0 && index < tempArraySize)
-        cJSON_DetachItemFromArray(phoneNumbers, index);
+        cJSON_DeleteItemFromArray(phoneNumbers, index);
 
       break;
     }
@@ -303,19 +365,19 @@ void update_person()
   case 6:
   {
     printf("Choose action to email addresses:\n");
-    printf("1. Add\n");
-    printf("2. Remove\n");
+    printf("1 - Add\n");
+    printf("2 - Remove\n");
     printf("Your choice: ");
 
     cJSON *emailAddresses = cJSON_GetObjectItem(json, "emailAddresses");
     int tempArraySize = cJSON_GetArraySize(emailAddresses);
 
-    switch (inputChar())
+    switch (input_char())
     {
     case '1':
     {
       printf("Enter new email address: ");
-      tempString = inputLine();
+      tempString = input_string();
       cJSON_AddItemToArray(emailAddresses, cJSON_CreateString(tempString));
       free(tempString);
       break;
@@ -330,15 +392,12 @@ void update_person()
 
       printf("Email addresses:\n");
       for (int i = 0; i < tempArraySize; i++)
-        printf("%d. %s\n", i + 1, cJSON_GetArrayItem(emailAddresses, i)->valuestring);
+        printf("%d) %s\n", i + 1, cJSON_GetArrayItem(emailAddresses, i)->valuestring);
       printf("Enter the index of the email address to remove (start with 1): ");
 
-      tempString = inputLine();
-      int index = atoi(tempString);
-      free(tempString);
-
+      int index = input_int();
       if (index >= 0 && index < tempArraySize)
-        cJSON_DetachItemFromArray(emailAddresses, index);
+        cJSON_DeleteItemFromArray(emailAddresses, index);
 
       break;
     }
@@ -350,14 +409,14 @@ void update_person()
   case 7:
   {
     printf("Married (y/n): ");
-    char tempChar = inputChar();
+    char tempChar = input_char();
     cJSON_ReplaceItemInObject(json, "isMarried", cJSON_CreateBool(tempChar == 'y' || tempChar == 'Y' ? true : false));
     break;
   }
   case 8:
   {
     printf("Employed (y/n): ");
-    char tempChar = inputChar();
+    char tempChar = input_char();
     cJSON_ReplaceItemInObject(json, "isEmployed", cJSON_CreateBool(tempChar == 'y' || tempChar == 'Y' ? true : false));
     break;
   }
@@ -367,7 +426,7 @@ void update_person()
 void delete_person()
 {
   printf("Enter the name of the person to delete: ");
-  char *name = inputLine();
+  char *name = input_string();
   bool result = delete_item(name);
   free(name);
 
@@ -379,23 +438,35 @@ void delete_person()
 
 void main_menu()
 {
+  DBModel *person_model = model("Person", DBModelType_Object);
+  define_model(person_model, model("name", DBModelType_String));
+  define_model(person_model, model("jobTitle", DBModelType_String));
+  define_model(person_model, model("age", DBModelType_Number));
+  define_model(person_model, model("address", DBModelType_String));
+  define_model(define_model(person_model, model("phoneNumbers", DBModelType_Array)), model(NULL, DBModelType_String));
+  define_model(define_model(person_model, model("emailAddresses", DBModelType_Array)), model(NULL, DBModelType_String));
+  define_model(person_model, model("isMarried", DBModelType_Boolean));
+  define_model(person_model, model("isEmployed", DBModelType_Boolean));
+
   while (1)
   {
     printf("\n################ Main Menu ################\n");
     printf("Welcome to CCH's address book!!!\n");
     printf("Choose an option:\n");
-    printf("C. Create a new person\n");
-    printf("R. Read a person\n");
-    printf("U. Update a person\n");
-    printf("D. Delete a person\n");
-    printf("X. Exit\n");
+    printf("C - Create a new person\n");
+    printf("R - Read a person\n");
+    printf("U - Update a person\n");
+    printf("D - Delete a person\n");
+    printf("K - List keys\n");
+    printf("S - Save database\n");
+    printf("X - Exit\n");
     printf("Your choice: ");
 
-    switch (inputChar())
+    switch (input_char())
     {
     case 'C':
     case 'c':
-      create_person();
+      create_person(person_model);
       break;
 
     case 'R':
@@ -412,6 +483,22 @@ void main_menu()
     case 'd':
       delete_person();
       break;
+
+    case 'S':
+    case 's':
+      save_database("database.json");
+      printf("Database saved successfully.\n");
+      break;
+
+    case 'K':
+    case 'k':
+    {
+      DBKeys *keys = get_keys();
+      for (int i = 0; i < keys->length; i++)
+        printf("%d) %s\n", i + 1, keys->keys[i]);
+      free_keys(keys);
+      break;
+    }
 
     case 'X':
     case 'x':
