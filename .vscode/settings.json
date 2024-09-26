@@ -3,10 +3,10 @@
   "editor.defaultFormatter": "ms-vscode.cpptools",
   "files.associations": {
     "*.ejs": "html",
+    "typeinfo": "c",
     "cjson.h": "c",
-    "stdlib.h": "c",
     "stdbool.h": "c",
     "database.h": "c",
-    "string.h": "c"
+    "interface.h": "c"
   }
 }

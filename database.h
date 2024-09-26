@@ -1,38 +1,23 @@
 #ifndef CCH137_DATABASE_H
 #define CCH137_DATABASE_H
 
-#include <stdint.h>
 #include <stdbool.h>
 #include "./cJSON.h"
 
-typedef struct Person
+typedef struct DBItem
 {
-  char *name;
-  char *jobTitle;
-  int age;
-  char *address;
-  char **phoneNumbers;
-  int phoneCount;
-  char **emailAddresses;
-  int emailCount;
-  bool isMarried;
-  bool isEmployed;
-  struct Person *next;
-} Person;
+  const char *key;
+  cJSON *json;
+  struct DBItem *next;
+} DBItem;
 
-extern Person *personsHead;
+bool has_key(const char *key);
+DBItem *get_item(const char *key);
+DBItem *create_item(const char *key, cJSON *json);
+DBItem *move_item(const char *oldKey, const char *newKey);
+bool delete_item(const char *key);
 
-Person *personConstructor(cJSON *personJSON);
-cJSON *personJSONConstructor(Person *person);
-void clearPerson(Person *person);
-void clearDatabase();
-void initDatabase(const char *filename);
-void saveDatabase(const char *filename);
-
-Person *findPerson(const char *name);
-uint8_t createPerson(Person *newPerson);
-bool updatePerson(const char *name, Person *updatedPerson);
-bool deletePerson(const char *name);
-bool exists(const char *name);
+void init_database(const char *filename);
+void save_database(const char *filename);
 
 #endif
