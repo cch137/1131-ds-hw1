@@ -277,11 +277,9 @@ void update_person()
   printf("8 - Employed\n");
   printf("Your choice: ");
 
-  int choice = input_int();
-
-  switch (choice)
+  switch (input_char())
   {
-  case 1:
+  case '1':
   {
     printf("Enter new name: ");
     tempString = input_string();
@@ -296,7 +294,7 @@ void update_person()
     free(tempString);
     break;
   }
-  case 2:
+  case '2':
   {
     printf("Enter new job title: ");
     tempString = input_string();
@@ -304,13 +302,13 @@ void update_person()
     free(tempString);
     break;
   }
-  case 3:
+  case '3':
   {
     printf("Enter new age: ");
     cJSON_ReplaceItemInObject(json, "age", cJSON_CreateNumber(input_int()));
     break;
   }
-  case 4:
+  case '4':
   {
     printf("Enter new address: ");
     tempString = input_string();
@@ -318,7 +316,7 @@ void update_person()
     free(tempString);
     break;
   }
-  case 5:
+  case '5':
   {
     printf("Choose action to phone numbers:\n");
     printf("1 - Add\n");
@@ -362,7 +360,7 @@ void update_person()
     }
     break;
   }
-  case 6:
+  case '6':
   {
     printf("Choose action to email addresses:\n");
     printf("1 - Add\n");
@@ -406,14 +404,14 @@ void update_person()
     }
     break;
   }
-  case 7:
+  case '7':
   {
     printf("Married (y/n): ");
     char tempChar = input_char();
     cJSON_ReplaceItemInObject(json, "isMarried", cJSON_CreateBool(tempChar == 'y' || tempChar == 'Y' ? true : false));
     break;
   }
-  case 8:
+  case '8':
   {
     printf("Employed (y/n): ");
     char tempChar = input_char();
