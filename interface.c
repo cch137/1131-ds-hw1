@@ -628,7 +628,7 @@ void main_menu()
 
     case 'S':
     case 's':
-      save_database("database.json");
+      save_database(DATABASE_FILENAME);
       printf("Database saved successfully.\n");
       break;
 

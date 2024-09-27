@@ -401,7 +401,7 @@ DBModel *def_model_attr(DBModel *model, DBModelType attr, int value)
   return model;
 }
 
-void init_database(const char *filename)
+void load_database(const char *filename)
 {
   // read the JSON file
   FILE *file = fopen(filename, "r");

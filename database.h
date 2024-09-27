@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include "./cJSON.h"
 
+#define DATABASE_FILENAME "database.json"
+
 typedef struct DBItem
 {
   char *key;
@@ -61,7 +63,7 @@ bool delete_item(const char *key);
 DBModel *def_model(DBModel *parent, const char *key, DBModelType type);
 DBModel *def_model_attr(DBModel *model, DBModelType attribute, int value);
 
-void init_database(const char *filename);
+void load_database(const char *filename);
 void save_database(const char *filename);
 
 #endif

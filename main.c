@@ -4,9 +4,9 @@
 
 int main()
 {
-  init_database("database.json");
+  load_database(DATABASE_FILENAME);
   main_menu();
-  save_database("database.json");
+  save_database(DATABASE_FILENAME);
 
   return 0;
 }
