@@ -10,49 +10,58 @@ char *input_string();
 int input_int();
 char input_char();
 char *int_to_string(int value);
-cJSON *input_cjson(DBModel *model, int depth);
 
-#define INPUT_LINE_CHUNK_SIZE 8
+void print_tabs(int depth, bool end_with_dash);
+
+#define INPUT_STRING_CHUNK_SIZE 8
 
 char *input_string()
 {
-  size_t bufferSize = INPUT_LINE_CHUNK_SIZE;
-  char *buffer = malloc(bufferSize);
+  size_t buffer_size = INPUT_STRING_CHUNK_SIZE;
+  size_t index = 0;
+  char *buffer = (char *)malloc(buffer_size * sizeof(char));
+
+  // return NULL if memory allocation fails
   if (!buffer)
     return NULL;
 
-  size_t index = 0;
   int c;
-
-  while (1)
+  // read characters until EOF or newline
+  while ((c = fgetc(stdin)) != EOF && c != '\n')
   {
-    c = fgetc(stdin);
-
-    if (c == EOF || c == '\n')
+    // check if the buffer needs to be expanded
+    if (index >= buffer_size - 1)
     {
-      buffer[index] = '\0';
-      break;
-    }
-
-    if (index >= bufferSize - 1)
-    {
-      bufferSize += INPUT_LINE_CHUNK_SIZE;
-      buffer = realloc(buffer, bufferSize);
+      buffer_size += INPUT_STRING_CHUNK_SIZE;
+      buffer = (char *)realloc(buffer, buffer_size * sizeof(char));
       if (!buffer)
-        return NULL;
+      {
+        printf("Error: Memory allocation failed.\n");
+        exit(1);
+      }
     }
-
-    buffer[index++] = c;
+    // store the character in the buffer
+    buffer[index++] = (char)c;
   }
 
+  // if EOF is encountered and no characters were read, free and return NULL
   if (index == 0 && c == EOF)
   {
     free(buffer);
     return NULL;
   }
 
-  buffer = realloc(buffer, index + 1);
-  return buffer;
+  buffer[index] = '\0'; // Null-terminate the string
+
+  // reallocate memory to match the exact string length
+  buffer = (char *)realloc(buffer, (index + 1) * sizeof(char));
+  if (!buffer)
+  {
+    printf("Error: Memory allocation failed.\n");
+    exit(1);
+  }
+
+  return buffer; // return the final string
 }
 
 int input_int()
@@ -85,85 +94,180 @@ char *int_to_string(int value)
   int length = value < 0 ? 3 : 2;
   while (digit_counter /= 10)
     length++;
-  char *string = (char *)calloc((length), sizeof(char));
+  char *string = (char *)calloc(length, sizeof(char));
+  if (string == NULL)
+    return NULL;
   sprintf(string, "%d", value);
   string[length - 1] = '\0';
   return string;
 }
 
-cJSON *input_cjson(DBModel *model, int depth)
+void print_tabs(int tab_depth, bool end_with_dash)
 {
+  if (end_with_dash)
+    while (tab_depth--)
+      printf(tab_depth ? "  " : "- ");
+  else
+    while (tab_depth--)
+      printf("  ");
+}
+
+cJSON *input_cjson_with_model(DBModel *model, int tab_depth)
+{
+  if (model == NULL)
+    return NULL;
+
   switch (model->type)
   {
   case DBModelType_Object:
   {
-    cJSON *object = cJSON_CreateObject();
-    int _depth = depth;
-    int length = model->length;
-    DBModel *attribute = NULL;
+    cJSON *created_object = cJSON_CreateObject();
 
-    while (_depth--)
-      printf(_depth ? "  " : "- ");
-    printf("<Object> %s:\n", model->key);
-
-    for (int i = 0; i < length; i++)
+    if (!created_object)
     {
-      attribute = model->attributes[i];
-
-      if (attribute == NULL)
-        continue;
-
-      cJSON_AddItemToObject(object, attribute->key, input_cjson(attribute, depth + 1));
+      printf("Error: Failed to create object.\n");
+      return NULL;
     }
 
-    return object;
+    int model_attributes_length = model->intvalue;
+    DBModel *attribute_model = NULL;
+
+    print_tabs(tab_depth, true);
+    printf("<Object> %s:\n", model->key);
+
+    for (int i = 0; i < model_attributes_length; i++)
+    {
+      attribute_model = model->attributes[i];
+
+      if (attribute_model == NULL)
+        continue;
+
+      cJSON_AddItemToObject(created_object, attribute_model->key, input_cjson_with_model(attribute_model, tab_depth + 1));
+    }
+
+    return created_object;
   }
 
   case DBModelType_Array:
   {
-    int _depth = depth;
-    char *buffer = NULL;
-    cJSON *array = cJSON_CreateArray();
+    cJSON *created_array = cJSON_CreateArray();
 
-    while (_depth--)
-      printf(_depth ? "  " : "- ");
-    printf("<Array> %s\n", model->key);
-    _depth = depth;
-    while (_depth--)
-      printf("  ");
-    printf("length: ");
-
-    int length = input_int();
-
-    for (int i = 0; i < length; i++)
+    if (!created_array)
     {
-      buffer = int_to_string(i + 1);
-      model->attributes[0]->key = buffer;
-
-      cJSON_AddItemToArray(array, input_cjson(model->attributes[0], depth + 1));
-
-      free(buffer);
+      printf("Error: Failed to create object.\n");
+      return NULL;
     }
-    return array;
+
+    // get array model properties
+    DBModelArrayProps *array_props = parse_array_model(model);
+    DBModel *array_type = array_props->type;
+    int min_length = array_props->max_length;
+    int max_length = array_props->min_length;
+    free(array_props);
+
+    print_tabs(tab_depth, true);
+    printf("<Array> %s\n", model->key);
+    print_tabs(tab_depth, false);
+
+    // if array type is not definde, return empty array
+    if (array_type == NULL)
+    {
+      printf("(Empty array)\n");
+      return created_array;
+    }
+    // if array max_length is 0, return empty array
+    if (max_length == 0)
+    {
+      printf("(Empty array)\n");
+      return created_array;
+    }
+    // check array length constraints
+    if ((max_length != -1 && max_length < min_length) || min_length < -1 || max_length < -1)
+    {
+      printf("Error: Invalid array length constraints.\n");
+      print_tabs(tab_depth, false);
+      printf("(Empty array)\n");
+      return created_array;
+    }
+
+    // input array length
+    int needed_length = 0;
+    if (min_length != -1 && min_length == max_length)
+    {
+      needed_length = max_length;
+    }
+    else
+    {
+      printf("length");
+      if (min_length == -1)
+        min_length = 0;
+      if (max_length == -1)
+      {
+        if (min_length != 0)
+          printf(" (>=%d)", min_length);
+      }
+      else
+        printf(" (%d~%d)", min_length, max_length);
+      printf(": ");
+      needed_length = input_int();
+      if (needed_length < min_length)
+      {
+        needed_length = min_length;
+        printf("Length set to %d due to minimum length requirement.\n", min_length);
+      }
+      else if (max_length != -1 && needed_length > max_length)
+      {
+        needed_length = max_length;
+        printf("Length set to %d due to maximum length requirement.\n", min_length);
+      }
+    }
+
+    // input array items
+    char *int_to_string_buffer = NULL;
+    for (int i = 0; i < needed_length; i++)
+    {
+      int_to_string_buffer = int_to_string(i + 1);
+      array_type->key = int_to_string_buffer;
+
+      cJSON_AddItemToArray(created_array, input_cjson_with_model(array_type, tab_depth + 1));
+
+      free(int_to_string_buffer);
+    }
+    array_type->key = NULL;
+
+    return created_array;
   }
 
   case DBModelType_String:
-    while (depth--)
-      printf(depth ? "  " : "- ");
-    printf("<String> %s: ", model->key);
-    return cJSON_CreateString(input_string());
+  {
+    print_tabs(tab_depth, true);
+    printf("<String>");
+    if (model->key)
+      printf(" %s", model->key);
+    printf(": ");
+    char *buffer = input_string();
+    cJSON *created_string = cJSON_CreateString(buffer);
+    free(buffer);
+    return created_string;
+  }
 
   case DBModelType_Number:
-    while (depth--)
-      printf(depth ? "  " : "- ");
-    printf("<Number> %s: ", model->key);
+  {
+    print_tabs(tab_depth, true);
+    printf("<Number>");
+    if (model->key)
+      printf(" %s", model->key);
+    printf(": ");
     return cJSON_CreateNumber(input_double());
+  }
 
   case DBModelType_Boolean:
   {
-    while (depth--)
-      printf(depth ? "  " : "- ");
-    printf("<Boolean> %s (y/n): ", model->key);
+    print_tabs(tab_depth, true);
+    printf("<Boolean> ");
+    if (model->key)
+      printf("%s ", model->key);
+    printf("(y/n): ");
     char choice = input_char();
     return cJSON_CreateBool(choice == 'y' || choice == 'Y');
   }
@@ -173,6 +277,170 @@ cJSON *input_cjson(DBModel *model, int depth)
 
   default:
     return NULL;
+  }
+}
+
+cJSON *edit_cjson_with_model(DBModel *model, cJSON *json, int tab_depth)
+{
+  if (model == NULL || json == NULL)
+    return NULL;
+
+  switch (model->type)
+  {
+  case DBModelType_Object:
+  {
+    DBKeys *keys = get_model_keys(model);
+    int keys_length = keys->length;
+
+    // list object fields
+    print_tabs(tab_depth, false);
+    printf("Object fields:\n");
+    DBModel *attribute_model = NULL;
+    if (keys_length == 0)
+    {
+      print_tabs(tab_depth, false);
+      printf("No fields available.\n");
+      return json;
+    }
+    else
+      for (int i = 0; i < keys_length; i++)
+      {
+        attribute_model = model->attributes[i];
+        print_tabs(tab_depth, false);
+        printf("%d - %s\n", i + 1, attribute_model->key);
+      }
+
+    // input field to edit
+    print_tabs(tab_depth, false);
+    printf("Select a field of <Object> ");
+    if (model->key)
+      printf("%s", model->key);
+    printf(" (1~%d): ", keys_length);
+    DBModel *selected_field_model = model->attributes[input_int() - 1];
+    if (selected_field_model == NULL)
+    {
+      print_tabs(tab_depth, false);
+      printf("Invalid field selection.\n");
+      return json;
+    }
+    const char *selected_key = selected_field_model->key;
+    print_tabs(tab_depth, false);
+    printf("Selected key: %s\n", selected_key);
+
+    // input field
+    cJSON *selected_field_cjson = cJSON_GetObjectItem(json, selected_key);
+    if (selected_field_cjson == NULL)
+    {
+      print_tabs(tab_depth, false);
+      printf("Field does not exist in the cJSON object.\n");
+      return json;
+    }
+    edit_cjson_with_model(selected_field_model, selected_field_cjson, tab_depth + 1);
+
+    return json;
+  }
+
+  case DBModelType_Array:
+  {
+    // get array type
+    DBModelArrayProps *array_props = parse_array_model(model);
+    DBModel *array_type = array_props->type;
+    free(array_props);
+    if (array_type == NULL)
+    {
+      print_tabs(tab_depth, false);
+      printf("Array type not defined.\n");
+      return json;
+    }
+
+    // print array length and actions
+    print_tabs(tab_depth, false);
+    printf("Array length: %d\n", cJSON_GetArraySize(json));
+    print_tabs(tab_depth, false);
+    printf("Array actions:\n");
+    print_tabs(tab_depth, false);
+    printf("1 - Add\n");
+    print_tabs(tab_depth, false);
+    printf("2 - Remove\n");
+    print_tabs(tab_depth, false);
+    printf("3 - Edit\n");
+    print_tabs(tab_depth, false);
+    printf("Select an action (1~3): ");
+
+    // input action
+    switch (input_char())
+    {
+    case '1': // add
+    {
+      cJSON *new_item = input_cjson_with_model(array_type, tab_depth + 1);
+      cJSON_AddItemToArray(json, new_item);
+      return json;
+    }
+
+    case '2': // remove
+    {
+      print_tabs(tab_depth, false);
+      printf("Select an index (start from 1) to remove: ");
+      cJSON_DeleteItemFromArray(json, input_int() - 1);
+      return json;
+    }
+
+    case '3': // eidt
+    {
+      print_tabs(tab_depth, false);
+      printf("Select an index (start from 1) to edit: ");
+
+      cJSON *item = cJSON_GetArrayItem(json, input_int() - 1);
+      if (item == NULL)
+      {
+        print_tabs(tab_depth, false);
+        printf("Invalid index.\n");
+        return json;
+      }
+
+      print_tabs(tab_depth, false);
+      printf("Current value of selected index: ");
+      edit_cjson_with_model(array_type, item, tab_depth + 1);
+
+      return json;
+    }
+
+    default:
+      print_tabs(tab_depth, false);
+      printf("Invalid action.\n");
+      return json;
+    }
+  }
+
+  case DBModelType_String:
+  {
+    print_tabs(tab_depth, true);
+    printf("Enter a string value: ");
+    char *new_value = input_string();
+    cJSON_SetValuestring(json, new_value);
+    free(new_value);
+    return json;
+  }
+
+  case DBModelType_Number:
+  {
+    print_tabs(tab_depth, true);
+    printf("Enter a number value: ");
+    cJSON_SetNumberValue(json, input_double());
+    return json;
+  }
+
+  case DBModelType_Boolean:
+  {
+    print_tabs(tab_depth, true);
+    printf("Enter a boolean value (y/n): ");
+    char new_value = input_char();
+    cJSON_SetBoolValue(json, new_value == 'y' || new_value == 'Y');
+    return json;
+  }
+
+  default:
+    return json;
   }
 }
 
@@ -210,7 +478,7 @@ void print_person(DBItem *item)
 
 void create_person(DBModel *person_model)
 {
-  cJSON *person_json = input_cjson(person_model, 0);
+  cJSON *person_json = input_cjson_with_model(person_model, 0);
   char *name = NULL;
 
   if (exists(cJSON_GetObjectItem(person_json, "name")->valuestring))
@@ -234,6 +502,7 @@ void create_person(DBModel *person_model)
   }
   else
   {
+    printf("Person has been successfully created.\n");
     set_item(name, person_json);
   }
 }
@@ -251,12 +520,12 @@ void read_person()
     print_person(item);
 }
 
-void update_person()
+void update_person(DBModel *person_model)
 {
   printf("Enter the name of the person to update: ");
-  char *tempString = input_string();
-  DBItem *item = get_item(tempString);
-  free(tempString);
+  char *name_buffer = input_string();
+  DBItem *item = get_item(name_buffer);
+  free(name_buffer);
 
   if (item == NULL)
   {
@@ -264,161 +533,36 @@ void update_person()
     return;
   }
 
-  cJSON *json = item->json;
-
-  printf("Choose field to update:\n");
-  printf("1 - Name\n");
-  printf("2 - Job Title\n");
-  printf("3 - Age\n");
-  printf("4 - Address\n");
-  printf("5 - Phone Numbers\n");
-  printf("6 - Email Addresses\n");
-  printf("7 - Married\n");
-  printf("8 - Employed\n");
-  printf("Your choice: ");
-
-  switch (input_char())
+  // record name before edit
+  name_buffer = cJSON_GetObjectItem(item->json, "name")->valuestring;
+  char *before_name = (char *)calloc(strlen(name_buffer), sizeof(char));
+  if (before_name == NULL)
   {
-  case '1':
+    printf("Error: Memory allocation failed.\n");
+    return;
+  }
+  strcpy(before_name, name_buffer);
+
+  // edit cjson
+  edit_cjson_with_model(person_model, item->json, 0);
+  char *after_name = cJSON_GetObjectItem(item->json, "name")->valuestring;
+
+  // if name changed, check if it exists, cancel the update
+  if (strcmp(before_name, after_name) != 0)
   {
-    printf("Enter new name: ");
-    tempString = input_string();
-    if (exists(tempString))
+    if (exists(after_name))
     {
+      // restore name
       printf("Person with this name already exists. Operation canceled.\n");
-      free(tempString);
-      break;
+      cJSON_SetValuestring(cJSON_GetObjectItem(item->json, "name"), before_name);
+      free(before_name);
+      return;
     }
-    cJSON_ReplaceItemInObject(json, "name", cJSON_CreateString(tempString));
-    rename_item(item->key, tempString);
-    free(tempString);
-    break;
+    rename_item(before_name, after_name);
   }
-  case '2':
-  {
-    printf("Enter new job title: ");
-    tempString = input_string();
-    cJSON_ReplaceItemInObject(json, "jobTitle", cJSON_CreateString(tempString));
-    free(tempString);
-    break;
-  }
-  case '3':
-  {
-    printf("Enter new age: ");
-    cJSON_ReplaceItemInObject(json, "age", cJSON_CreateNumber(input_int()));
-    break;
-  }
-  case '4':
-  {
-    printf("Enter new address: ");
-    tempString = input_string();
-    cJSON_ReplaceItemInObject(json, "address", cJSON_CreateString(tempString));
-    free(tempString);
-    break;
-  }
-  case '5':
-  {
-    printf("Choose action to phone numbers:\n");
-    printf("1 - Add\n");
-    printf("2 - Remove\n");
-    printf("Your choice: ");
 
-    cJSON *phoneNumbers = cJSON_GetObjectItem(json, "phoneNumbers");
-    int tempArraySize = cJSON_GetArraySize(phoneNumbers);
-
-    switch (input_char())
-    {
-    case '1':
-    {
-      printf("Enter new phone number: ");
-      tempString = input_string();
-      cJSON_AddItemToArray(phoneNumbers, cJSON_CreateString(tempString));
-      free(tempString);
-      break;
-    }
-    case '2':
-    {
-      if (tempArraySize == 0)
-      {
-        printf("No phone numbers to remove.\n");
-        break;
-      }
-
-      printf("Phone numbers:\n");
-      for (int i = 0; i < tempArraySize; i++)
-        printf("%d) %s\n", i + 1, cJSON_GetArrayItem(phoneNumbers, i)->valuestring);
-      printf("Enter the index of the phone number to remove (start with 1): ");
-
-      int index = input_int();
-      if (index >= 0 && index < tempArraySize)
-        cJSON_DeleteItemFromArray(phoneNumbers, index);
-
-      break;
-    }
-    default:
-      break;
-    }
-    break;
-  }
-  case '6':
-  {
-    printf("Choose action to email addresses:\n");
-    printf("1 - Add\n");
-    printf("2 - Remove\n");
-    printf("Your choice: ");
-
-    cJSON *emailAddresses = cJSON_GetObjectItem(json, "emailAddresses");
-    int tempArraySize = cJSON_GetArraySize(emailAddresses);
-
-    switch (input_char())
-    {
-    case '1':
-    {
-      printf("Enter new email address: ");
-      tempString = input_string();
-      cJSON_AddItemToArray(emailAddresses, cJSON_CreateString(tempString));
-      free(tempString);
-      break;
-    }
-    case '2':
-    {
-      if (tempArraySize == 0)
-      {
-        printf("No email addresses to remove.\n");
-        break;
-      }
-
-      printf("Email addresses:\n");
-      for (int i = 0; i < tempArraySize; i++)
-        printf("%d) %s\n", i + 1, cJSON_GetArrayItem(emailAddresses, i)->valuestring);
-      printf("Enter the index of the email address to remove (start with 1): ");
-
-      int index = input_int();
-      if (index >= 0 && index < tempArraySize)
-        cJSON_DeleteItemFromArray(emailAddresses, index);
-
-      break;
-    }
-    default:
-      break;
-    }
-    break;
-  }
-  case '7':
-  {
-    printf("Married (y/n): ");
-    char tempChar = input_char();
-    cJSON_ReplaceItemInObject(json, "isMarried", cJSON_CreateBool(tempChar == 'y' || tempChar == 'Y' ? true : false));
-    break;
-  }
-  case '8':
-  {
-    printf("Employed (y/n): ");
-    char tempChar = input_char();
-    cJSON_ReplaceItemInObject(json, "isEmployed", cJSON_CreateBool(tempChar == 'y' || tempChar == 'Y' ? true : false));
-    break;
-  }
-  }
+  free(before_name);
+  printf("Person has been successfully updated.\n");
 }
 
 void delete_person()
@@ -436,15 +580,15 @@ void delete_person()
 
 void main_menu()
 {
-  DBModel *person_model = model("Person", DBModelType_Object);
-  define_model(person_model, model("name", DBModelType_String));
-  define_model(person_model, model("jobTitle", DBModelType_String));
-  define_model(person_model, model("age", DBModelType_Number));
-  define_model(person_model, model("address", DBModelType_String));
-  define_model(define_model(person_model, model("phoneNumbers", DBModelType_Array)), model(NULL, DBModelType_String));
-  define_model(define_model(person_model, model("emailAddresses", DBModelType_Array)), model(NULL, DBModelType_String));
-  define_model(person_model, model("isMarried", DBModelType_Boolean));
-  define_model(person_model, model("isEmployed", DBModelType_Boolean));
+  DBModel *person_model = def_model(NULL, "Person", DBModelType_Object);
+  def_model(person_model, "name", DBModelType_String);
+  def_model(person_model, "jobTitle", DBModelType_String);
+  def_model(person_model, "age", DBModelType_Number);
+  def_model(person_model, "address", DBModelType_String);
+  def_model(def_model(person_model, "phoneNumbers", DBModelType_Array), NULL, DBModelType_String);
+  def_model(def_model(person_model, "emailAddresses", DBModelType_Array), NULL, DBModelType_String);
+  def_model(person_model, "isMarried", DBModelType_Boolean);
+  def_model(person_model, "isEmployed", DBModelType_Boolean);
 
   while (1)
   {
@@ -474,7 +618,7 @@ void main_menu()
 
     case 'U':
     case 'u':
-      update_person();
+      update_person(person_model);
       break;
 
     case 'D':
@@ -491,7 +635,7 @@ void main_menu()
     case 'K':
     case 'k':
     {
-      DBKeys *keys = get_keys();
+      DBKeys *keys = get_database_keys();
       for (int i = 0; i < keys->length; i++)
         printf("%d) %s\n", i + 1, keys->keys[i]);
       free_keys(keys);

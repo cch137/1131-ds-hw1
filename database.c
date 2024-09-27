@@ -107,12 +107,94 @@ DBItem static *set_item_key(DBItem *item, const char *key)
   }
 
   memset(item->key, 0, size);
-  item->key = strcpy(item->key, key);
+  strcpy(item->key, key);
 
   return item;
 }
 
-DBKeys *get_keys()
+DBKeys *get_model_keys(DBModel *model)
+{
+  DBKeys *keys = (DBKeys *)malloc(sizeof(DBKeys));
+
+  if (keys == NULL)
+  {
+    printf("Error: Failed to allocate memory for keys\n");
+    exit(1);
+  }
+
+  keys->length = 0;
+  keys->keys = NULL;
+
+  if (model->type != DBModelType_Object)
+    return keys;
+
+  int length = model->intvalue;
+
+  keys->keys = (const char **)malloc(length * sizeof(const char *));
+  if (keys->keys == NULL)
+  {
+    printf("Error: Failed to allocate memory for keys->keys\n");
+    exit(1);
+  }
+  keys->length = length;
+
+  for (int i = 0; i < length; i++)
+  {
+    keys->keys[i] = model->attributes[i]->key;
+  }
+
+  return keys;
+}
+
+#define GET_KEYS_CHUNK_SIZE 8
+
+DBKeys *get_cjson_keys(cJSON *json)
+{
+  DBKeys *keys = (DBKeys *)malloc(sizeof(DBKeys));
+
+  if (keys == NULL)
+  {
+    printf("Error: Failed to allocate memory for keys\n");
+    exit(1);
+  }
+
+  keys->length = 0;
+  keys->keys = NULL;
+  int count = 0;
+
+  cJSON *cursor = json->child;
+  while (cursor != NULL)
+  {
+    count++;
+    if (keys->length < count)
+    {
+      keys->length += GET_KEYS_CHUNK_SIZE;
+      keys->keys = (const char **)realloc(keys->keys, keys->length * sizeof(const char *));
+      if (keys->keys == NULL)
+      {
+        printf("Error: Failed to allocate memory for keys->keys\n");
+        exit(1);
+      }
+    }
+    keys->keys[count - 1] = cursor->string;
+    cursor = cursor->next;
+  }
+
+  if (keys->length != count)
+  {
+    keys->length = count;
+    keys->keys = (const char **)realloc(keys->keys, count * sizeof(const char *));
+    if (keys->keys == NULL)
+    {
+      printf("Error: Failed to allocate memory for keys->keys\n");
+      exit(1);
+    }
+  }
+
+  return keys;
+}
+
+DBKeys *get_database_keys()
 {
   DBKeys *keys = (DBKeys *)malloc(sizeof(DBKeys));
 
@@ -135,8 +217,8 @@ DBKeys *get_keys()
       count++;
       if (keys->length < count)
       {
-        keys->length += 8;
-        keys->keys = (char **)realloc(keys->keys, keys->length * sizeof(char *));
+        keys->length += GET_KEYS_CHUNK_SIZE;
+        keys->keys = (const char **)realloc(keys->keys, keys->length * sizeof(const char *));
         if (keys->keys == NULL)
         {
           printf("Error: Failed to allocate memory for keys->keys\n");
@@ -151,7 +233,7 @@ DBKeys *get_keys()
   if (keys->length != count)
   {
     keys->length = count;
-    keys->keys = (char **)realloc(keys->keys, count * sizeof(char *));
+    keys->keys = (const char **)realloc(keys->keys, count * sizeof(const char *));
     if (keys->keys == NULL)
     {
       printf("Error: Failed to allocate memory for keys->keys\n");
@@ -160,6 +242,36 @@ DBKeys *get_keys()
   }
 
   return keys;
+}
+
+DBModelArrayProps *parse_array_model(DBModel *model)
+{
+  DBModelArrayProps *array_attributes = (DBModelArrayProps *)malloc(sizeof(DBModelArrayProps));
+  if (array_attributes == NULL)
+  {
+    printf("Error: Failed to allocate memory for DBModelArrayProps\n");
+    exit(1);
+  }
+  array_attributes->max_length = -1;
+  array_attributes->min_length = -1;
+  array_attributes->type = NULL;
+
+  if (model == NULL)
+    return array_attributes;
+
+  int attributes_length = model->intvalue;
+
+  for (int i = 0; i < attributes_length; i++)
+  {
+    if (model->attributes[i]->type == DBModelAttr_MaxLength)
+      array_attributes->max_length = model->attributes[i]->intvalue;
+    else if (model->attributes[i]->type == DBModelAttr_MinLength)
+      array_attributes->min_length = model->attributes[i]->intvalue;
+    else if (model->attributes[i]->key == NULL)
+      array_attributes->type = model->attributes[i];
+  }
+
+  return array_attributes;
 }
 
 void free_keys(DBKeys *keys)
@@ -214,21 +326,21 @@ DBItem *set_item(const char *key, cJSON *json)
   return item;
 }
 
-DBItem *rename_item(const char *oldKey, const char *newKey)
+DBItem *rename_item(const char *old_key, const char *new_key)
 {
-  if (oldKey == NULL || newKey == NULL || exists(newKey))
+  if (old_key == NULL || new_key == NULL || exists(new_key))
     return NULL;
 
   // remove item with old key
-  DBItem *item = remove_item_from_hash_table(oldKey);
-  cJSON_DetachItemFromObject(json_root, oldKey);
+  DBItem *item = remove_item_from_hash_table(old_key);
+  cJSON_DetachItemFromObject(json_root, old_key);
 
   // add item with new key
-  add_item_to_hash_table(newKey, item);
-  cJSON_AddItemToObject(json_root, newKey, item->json);
+  add_item_to_hash_table(new_key, item);
+  cJSON_AddItemToObject(json_root, new_key, item->json);
 
   // rename item
-  set_item_key(item, newKey);
+  set_item_key(item, new_key);
 
   return item;
 }
@@ -247,7 +359,8 @@ bool delete_item(const char *key)
   return true;
 }
 
-DBModel *model(const char *key, DBModelType type)
+// Returns the attribute Model.
+DBModel *def_model(DBModel *parent, const char *key, DBModelType type)
 {
   DBModel *model = (DBModel *)malloc(sizeof(DBModel));
 
@@ -259,26 +372,33 @@ DBModel *model(const char *key, DBModelType type)
 
   model->key = key;
   model->type = type;
-  model->length = 0;
+  model->intvalue = 0;
   model->attributes = NULL;
 
-  return model;
-}
+  if (parent == NULL)
+    return model;
 
-DBModel *define_model(DBModel *model, DBModel *attribute)
-{
-  model->attributes = (DBModel **)realloc(model->attributes, (model->length + 1) * sizeof(DBModel *));
+  parent->attributes = (DBModel **)realloc(parent->attributes, (parent->intvalue + 1) * sizeof(DBModel *));
 
-  if (model->attributes == NULL)
+  if (parent->attributes == NULL)
   {
     printf("Error: Failed to allocate memory for model->attributes\n");
     exit(1);
   }
 
-  model->attributes[model->length] = attribute;
-  model->length++;
+  parent->attributes[parent->intvalue] = model;
+  parent->intvalue++;
 
-  return attribute;
+  return model;
+}
+
+// Returns the Model with the property set.
+DBModel *def_model_attr(DBModel *model, DBModelType attr, int value)
+{
+  DBModel *attribute = def_model(model, NULL, attr);
+  attribute->intvalue = value;
+
+  return model;
 }
 
 void init_database(const char *filename)
