@@ -159,11 +159,11 @@ cJSON *input_cjson_with_model(DBModel *model, int tab_depth)
     }
 
     // get array model properties
-    DBModelArrayProps *array_props = parse_array_model(model);
-    DBModel *array_type = array_props->type;
-    int min_length = array_props->max_length;
-    int max_length = array_props->min_length;
-    free(array_props);
+    DBModel *array_type = get_model_attr(model, DBModelAttr_ArrayTypeGetter);
+    DBModel *attr_pointer = get_model_attr(model, DBModelAttr_MinLength);
+    int min_length = attr_pointer ? attr_pointer->intvalue : -1;
+    attr_pointer = get_model_attr(model, DBModelAttr_MaxLength);
+    int max_length = attr_pointer ? attr_pointer->intvalue : -1;
 
     print_tabs(tab_depth, true);
     printf("<Array> %s\n", model->key);
@@ -343,9 +343,7 @@ cJSON *edit_cjson_with_model(DBModel *model, cJSON *json, int tab_depth)
   case DBModelType_Array:
   {
     // get array type
-    DBModelArrayProps *array_props = parse_array_model(model);
-    DBModel *array_type = array_props->type;
-    free(array_props);
+    DBModel *array_type = get_model_attr(model, DBModelAttr_ArrayTypeGetter);
     if (array_type == NULL)
     {
       print_tabs(tab_depth, false);
@@ -585,8 +583,8 @@ void main_menu()
   def_model(person_model, "jobTitle", DBModelType_String);
   def_model(person_model, "age", DBModelType_Number);
   def_model(person_model, "address", DBModelType_String);
-  def_model(def_model(person_model, "phoneNumbers", DBModelType_Array), NULL, DBModelType_String);
-  def_model(def_model(person_model, "emailAddresses", DBModelType_Array), NULL, DBModelType_String);
+  def_model(def_model(person_model, "phoneNumbers", DBModelType_Array), DBModel_ArrayTypeSymbol, DBModelType_String);
+  def_model(def_model(person_model, "emailAddresses", DBModelType_Array), DBModel_ArrayTypeSymbol, DBModelType_String);
   def_model(person_model, "isMarried", DBModelType_Boolean);
   def_model(person_model, "isEmployed", DBModelType_Boolean);
 

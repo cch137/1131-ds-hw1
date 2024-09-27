@@ -6,6 +6,8 @@
 
 #define DATABASE_FILENAME "database.json"
 
+// items
+
 typedef struct DBItem
 {
   char *key;
@@ -13,11 +15,15 @@ typedef struct DBItem
   struct DBItem *next;
 } DBItem;
 
-typedef struct DBKeys
-{
-  int length;
-  const char **keys;
-} DBKeys;
+bool exists(const char *key);
+DBItem *get_item(const char *key);
+DBItem *set_item(const char *key, cJSON *json);
+DBItem *rename_item(const char *old_key, const char *new_key);
+bool delete_item(const char *key);
+
+// models
+
+#define DBModel_ArrayTypeSymbol NULL
 
 typedef enum DBModelType
 {
@@ -27,6 +33,7 @@ typedef enum DBModelType
   DBModelType_Number,
   DBModelType_Boolean,
   DBModelType_Null,
+  DBModelAttr_ArrayTypeGetter,
   DBModelAttr_MaxLength,
   DBModelAttr_MinLength
 } DBModelType;
@@ -39,29 +46,24 @@ typedef struct DBModel
   struct DBModel **attributes;
 } DBModel;
 
-typedef struct DBModelArrayProps
+DBModel *def_model(DBModel *parent, const char *key, DBModelType type);
+DBModel *def_model_attr(DBModel *model, DBModelType attribute, int value);
+DBModel *get_model_attr(DBModel *model, DBModelType type);
+
+// keys
+
+typedef struct DBKeys
 {
-  DBModel *type;
-  // If min_length is -1, it means there is no min_length to the length.
-  int min_length;
-  // If max_length is -1, it means there is no max_length to the length.
-  int max_length;
-} DBModelArrayProps;
+  int length;
+  const char **keys;
+} DBKeys;
 
 DBKeys *get_model_keys(DBModel *model);
 DBKeys *get_cjson_keys(cJSON *json);
-void free_keys(DBKeys *keys);
 DBKeys *get_database_keys();
-DBModelArrayProps *parse_array_model(DBModel *model);
+void free_keys(DBKeys *keys);
 
-bool exists(const char *key);
-DBItem *get_item(const char *key);
-DBItem *set_item(const char *key, cJSON *json);
-DBItem *rename_item(const char *old_key, const char *new_key);
-bool delete_item(const char *key);
-
-DBModel *def_model(DBModel *parent, const char *key, DBModelType type);
-DBModel *def_model_attr(DBModel *model, DBModelType attribute, int value);
+// database
 
 void load_database(const char *filename);
 void save_database(const char *filename);
