@@ -1,2 +1,2 @@
-gcc -o main main.c cJSON.c database.c interface.c
-./main
+gcc -o test test.c cJSON.c utils.c database.c interface.c
+./test

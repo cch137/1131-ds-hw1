@@ -9,6 +9,10 @@
 		"isMarried":	true,
 		"isEmployed":	true
 	},
+	"Person1":	{
+		"name":	"Person1",
+		"jobTitle":	"Engineer"
+	},
 	"Sam":	{
 		"name":	"Sam",
 		"jobTitle":	"System Administrator",
@@ -26,16 +30,6 @@
 		"address":	"789 Olive St",
 		"phoneNumbers":	["111-222-3333"],
 		"emailAddresses":	["xander@example.com"],
-		"isMarried":	true,
-		"isEmployed":	true
-	},
-	"Alice":	{
-		"name":	"Alice",
-		"jobTitle":	"Software Engineer",
-		"age":	30,
-		"address":	"123 Main St",
-		"phoneNumbers":	["123-456-7890", "098-765-4321"],
-		"emailAddresses":	["alice@example.com", "alice.work@example.com"],
 		"isMarried":	true,
 		"isEmployed":	true
 	},

@@ -9,6 +9,8 @@
     "database.h": "c",
     "interface.h": "c",
     "compare": "c",
-    "type_traits": "c"
+    "type_traits": "c",
+    "utils.h": "c",
+    "pthread.h": "c"
   }
 }

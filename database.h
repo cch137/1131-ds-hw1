@@ -2,9 +2,12 @@
 #define CCH137_DATABASE_H
 
 #include <stdbool.h>
+#include <pthread.h>
 #include "./cJSON.h"
 
 #define DATABASE_FILENAME "database.json"
+
+extern pthread_mutex_t *db_mutex;
 
 // items
 

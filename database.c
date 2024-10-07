@@ -2,15 +2,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <pthread.h>
 #include "./cJSON.h"
+#include "./utils.h"
 #include "./database.h"
 
 #define HASH_MOD 5831
 #define HASH_SHIFT_BITS 5
 #define HASH_TABLE_SIZE 137
 
-cJSON *json_root = NULL;
 DBItem **hash_table = NULL;
+
+// The mutex is locked while the database is being read and written.
+// We will not destroy the mutex because it has a continuing purpose in the program.
+pthread_mutex_t _db_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t *db_mutex = &_db_mutex;
 
 unsigned long static hash(const char *string);
 DBItem static *create_item_with_json(const char *key, cJSON *json);
@@ -18,6 +24,7 @@ DBItem static *add_item_to_hash_table(const char *key, DBItem *item);
 DBItem static *remove_item_from_hash_table(const char *key);
 DBItem static *set_item_key(DBItem *item, const char *key);
 
+// DBJ2 hash
 unsigned long static hash(const char *string)
 {
   if (string == NULL)
@@ -39,11 +46,8 @@ DBItem static *create_item_with_json(const char *key, cJSON *json)
 
   DBItem *item = (DBItem *)malloc(sizeof(DBItem));
 
-  if (item == NULL)
-  {
-    printf("Error: Failed to allocate memory for item\n");
-    exit(1);
-  }
+  if (!item)
+    memory_error_handler(__FILE__, __LINE__, __func__);
 
   item->key = NULL;
   item->json = json;
@@ -97,16 +101,13 @@ DBItem static *set_item_key(DBItem *item, const char *key)
   if (item == NULL || key == NULL)
     return NULL;
 
-  size_t size = (strlen(key) + 1) * sizeof(char);
-  item->key = (char *)realloc(item->key, size);
+  size_t key_length = (strlen(key) + 1) * sizeof(char);
+  item->key = (char *)realloc(item->key, key_length);
 
-  if (item->key == NULL)
-  {
-    printf("Error: Failed to allocate memory for item->key\n");
-    exit(1);
-  }
+  if (!item->key)
+    memory_error_handler(__FILE__, __LINE__, __func__);
 
-  memset(item->key, 0, size);
+  memset(item->key, 0, key_length);
   strcpy(item->key, key);
 
   return item;
@@ -123,15 +124,20 @@ DBItem *get_item(const char *key)
     return NULL;
 
   unsigned long index = hash(key);
+  pthread_mutex_lock(db_mutex);
   DBItem *item = hash_table[index];
 
   while (item != NULL)
   {
     if (strcmp(item->key, key) == 0)
+    {
+      pthread_mutex_unlock(db_mutex);
       return item;
+    }
     item = item->next;
   }
 
+  pthread_mutex_unlock(db_mutex);
   return NULL;
 }
 
@@ -141,32 +147,36 @@ DBItem *set_item(const char *key, cJSON *json)
     return NULL;
 
   DBItem *oldItem = get_item(key);
+
   if (oldItem != NULL)
   {
     if (oldItem->json == json)
+    {
       return oldItem;
+    }
     delete_item(key);
   }
 
   DBItem *item = create_item_with_json(key, json);
+  pthread_mutex_lock(db_mutex);
   add_item_to_hash_table(key, item);
-  cJSON_AddItemToObject(json_root, key, json);
 
+  pthread_mutex_unlock(db_mutex);
   return item;
 }
 
 DBItem *rename_item(const char *old_key, const char *new_key)
 {
-  if (old_key == NULL || new_key == NULL || exists(new_key))
+  if (old_key == NULL || new_key == NULL || !exists(old_key) || exists(new_key))
     return NULL;
 
+  pthread_mutex_lock(db_mutex);
   // remove item with old key
   DBItem *item = remove_item_from_hash_table(old_key);
-  cJSON_DetachItemFromObject(json_root, old_key);
 
   // add item with new key
   add_item_to_hash_table(new_key, item);
-  cJSON_AddItemToObject(json_root, new_key, item->json);
+  pthread_mutex_unlock(db_mutex);
 
   // rename item
   set_item_key(item, new_key);
@@ -177,7 +187,9 @@ DBItem *rename_item(const char *old_key, const char *new_key)
 // Return true if success, false if fail.
 bool delete_item(const char *key)
 {
+  pthread_mutex_lock(db_mutex);
   DBItem *item = remove_item_from_hash_table(key);
+  pthread_mutex_unlock(db_mutex);
 
   if (item == NULL)
     return false;
@@ -193,11 +205,8 @@ DBModel *def_model(DBModel *parent, const char *key, DBModelType type)
 {
   DBModel *model = (DBModel *)malloc(sizeof(DBModel));
 
-  if (model == NULL)
-  {
-    printf("Error: Failed to create model\n");
-    exit(1);
-  }
+  if (!model)
+    memory_error_handler(__FILE__, __LINE__, __func__);
 
   model->key = key;
   model->type = type;
@@ -209,11 +218,8 @@ DBModel *def_model(DBModel *parent, const char *key, DBModelType type)
 
   parent->attributes = (DBModel **)realloc(parent->attributes, (parent->intvalue + 1) * sizeof(DBModel *));
 
-  if (parent->attributes == NULL)
-  {
-    printf("Error: Failed to allocate memory for model->attributes\n");
-    exit(1);
-  }
+  if (!parent->attributes)
+    memory_error_handler(__FILE__, __LINE__, __func__);
 
   parent->attributes[parent->intvalue] = model;
   parent->intvalue++;
@@ -261,11 +267,8 @@ DBKeys *get_model_keys(DBModel *model)
 {
   DBKeys *keys = (DBKeys *)malloc(sizeof(DBKeys));
 
-  if (keys == NULL)
-  {
-    printf("Error: Failed to allocate memory for keys\n");
-    exit(1);
-  }
+  if (!keys)
+    memory_error_handler(__FILE__, __LINE__, __func__);
 
   keys->length = 0;
   keys->keys = NULL;
@@ -276,11 +279,10 @@ DBKeys *get_model_keys(DBModel *model)
   int length = model->intvalue;
 
   keys->keys = (const char **)malloc(length * sizeof(const char *));
-  if (keys->keys == NULL)
-  {
-    printf("Error: Failed to allocate memory for keys->keys\n");
-    exit(1);
-  }
+
+  if (!keys->keys)
+    memory_error_handler(__FILE__, __LINE__, __func__);
+
   keys->length = length;
 
   for (int i = 0; i < length; i++)
@@ -297,11 +299,8 @@ DBKeys *get_cjson_keys(cJSON *json)
 {
   DBKeys *keys = (DBKeys *)malloc(sizeof(DBKeys));
 
-  if (keys == NULL)
-  {
-    printf("Error: Failed to allocate memory for keys\n");
-    exit(1);
-  }
+  if (!keys)
+    memory_error_handler(__FILE__, __LINE__, __func__);
 
   keys->length = 0;
   keys->keys = NULL;
@@ -315,11 +314,9 @@ DBKeys *get_cjson_keys(cJSON *json)
     {
       keys->length += GET_KEYS_CHUNK_SIZE;
       keys->keys = (const char **)realloc(keys->keys, keys->length * sizeof(const char *));
-      if (keys->keys == NULL)
-      {
-        printf("Error: Failed to allocate memory for keys->keys\n");
-        exit(1);
-      }
+
+      if (!keys->keys)
+        memory_error_handler(__FILE__, __LINE__, __func__);
     }
     keys->keys[count - 1] = cursor->string;
     cursor = cursor->next;
@@ -329,11 +326,8 @@ DBKeys *get_cjson_keys(cJSON *json)
   {
     keys->length = count;
     keys->keys = (const char **)realloc(keys->keys, count * sizeof(const char *));
-    if (keys->keys == NULL)
-    {
-      printf("Error: Failed to allocate memory for keys->keys\n");
-      exit(1);
-    }
+    if (!keys->keys)
+      memory_error_handler(__FILE__, __LINE__, __func__);
   }
 
   return keys;
@@ -343,11 +337,8 @@ DBKeys *get_database_keys()
 {
   DBKeys *keys = (DBKeys *)malloc(sizeof(DBKeys));
 
-  if (keys == NULL)
-  {
-    printf("Error: Failed to allocate memory for keys\n");
-    exit(1);
-  }
+  if (!keys)
+    memory_error_handler(__FILE__, __LINE__, __func__);
 
   keys->length = 0;
   keys->keys = NULL;
@@ -364,11 +355,8 @@ DBKeys *get_database_keys()
       {
         keys->length += GET_KEYS_CHUNK_SIZE;
         keys->keys = (const char **)realloc(keys->keys, keys->length * sizeof(const char *));
-        if (keys->keys == NULL)
-        {
-          printf("Error: Failed to allocate memory for keys->keys\n");
-          exit(1);
-        }
+        if (!keys->keys)
+          memory_error_handler(__FILE__, __LINE__, __func__);
       }
       keys->keys[count - 1] = cursor->key;
       cursor = cursor->next;
@@ -379,11 +367,8 @@ DBKeys *get_database_keys()
   {
     keys->length = count;
     keys->keys = (const char **)realloc(keys->keys, count * sizeof(const char *));
-    if (keys->keys == NULL)
-    {
-      printf("Error: Failed to allocate memory for keys->keys\n");
-      exit(1);
-    }
+    if (!keys->keys)
+      memory_error_handler(__FILE__, __LINE__, __func__);
   }
 
   return keys;
@@ -402,73 +387,77 @@ void load_database(const char *filename)
 {
   // read the JSON file
   FILE *file = fopen(filename, "r");
+  char *db_json_string = NULL;
+  long length = 0;
+
   if (file == NULL)
   {
-    printf("Error: Failed to open file %s\n", filename);
-    exit(1);
+    printf("Warning: Failed to open file %s\n", filename);
   }
-  fseek(file, 0, SEEK_END);
-  long length = ftell(file);
-  fseek(file, 0, SEEK_SET);
-  char *db_json_string = (char *)calloc((length + 1), sizeof(char));
-  if (db_json_string == NULL)
+  else
   {
-    printf("Error: Failed to allocate memory for data\n");
-    exit(1);
+    fseek(file, 0, SEEK_END);
+    length = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    db_json_string = (char *)calloc((length + 1), sizeof(char));
+    if (!db_json_string)
+      memory_error_handler(__FILE__, __LINE__, __func__);
+    fread(db_json_string, 1, length, file);
+    fclose(file);
+    // prevent memory leak
+    db_json_string[length] = '\0';
   }
-  fread(db_json_string, 1, length, file);
-  fclose(file);
-  // prevent memory leak
-  db_json_string[length] = '\0';
 
   // clear table if table is not NULL
   if (hash_table != NULL)
   {
+    DBItem *item = NULL;
+    DBItem *next = NULL;
     for (int i = 0; i < HASH_TABLE_SIZE; i++)
     {
-      DBItem *item = hash_table[i];
+      item = hash_table[i];
       while (item != NULL)
       {
+        next = item->next;
+        free(item->key);
         free(item);
-        item = item->next;
+        item = next;
       }
     }
     free(hash_table);
     hash_table = NULL;
-  };
-
-  // clear json root if json root is not NULL
-  if (json_root != NULL)
-  {
-    cJSON_Delete(json_root);
-    json_root = NULL;
   }
 
   // create hash table
   hash_table = (DBItem **)calloc(HASH_TABLE_SIZE, sizeof(DBItem *));
 
-  if (hash_table == NULL)
-  {
-    printf("Error: Failed to allocate memory for hash table\n");
-    exit(1);
-  }
+  if (!hash_table)
+    memory_error_handler(__FILE__, __LINE__, __func__);
 
   // create json root
-  json_root = cJSON_Parse(db_json_string);
+  cJSON *json_root = NULL;
+  if (db_json_string)
+  {
+    json_root = cJSON_Parse(db_json_string);
+    free(db_json_string);
+  }
   if (json_root == NULL)
     json_root = cJSON_CreateObject();
-
-  free(db_json_string);
 
   // load items
   cJSON *json_cursor = json_root->child;
   DBItem *item = NULL;
+
+  pthread_mutex_lock(db_mutex);
   while (json_cursor != NULL)
   {
-    item = create_item_with_json(json_cursor->string, json_cursor);
+    item = create_item_with_json(json_cursor->string, cJSON_Duplicate(json_cursor, true));
     add_item_to_hash_table(json_cursor->string, item);
     json_cursor = json_cursor->next;
   }
+  pthread_mutex_unlock(db_mutex);
+
+  cJSON_Delete(json_root);
 }
 
 void save_database(const char *filename)
@@ -477,8 +466,29 @@ void save_database(const char *filename)
   if (file == NULL)
     return;
 
+  cJSON *json_root = cJSON_CreateObject();
+
+  pthread_mutex_lock(db_mutex);
+
+  // iter hash table and get items, then set to json root
+  DBItem *item = NULL;
+  for (int i = 0; i < HASH_TABLE_SIZE; i++)
+  {
+    item = hash_table[i];
+    while (item != NULL)
+    {
+      cJSON_AddItemReferenceToObject(json_root, item->key, item->json);
+      item = item->next;
+    }
+  }
+  pthread_mutex_unlock(db_mutex);
+
   char *data = cJSON_Print(json_root);
-  fprintf(file, "%s", data);
-  free(data);
+  cJSON_Delete(json_root);
+  if (data)
+  {
+    fprintf(file, "%s", data);
+    free(data);
+  }
   fclose(file);
 }

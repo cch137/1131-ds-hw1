@@ -2,115 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include "./interface.h"
 #include "./cJSON.h"
+#include "./utils.h"
 #include "./database.h"
-
-char *input_string();
-int input_int();
-char input_char();
-char *int_to_string(int value);
-
-void print_tabs(int depth, bool end_with_dash);
-
-#define INPUT_STRING_CHUNK_SIZE 8
-
-char *input_string()
-{
-  size_t buffer_size = INPUT_STRING_CHUNK_SIZE;
-  size_t index = 0;
-  char *buffer = (char *)malloc(buffer_size * sizeof(char));
-
-  // return NULL if memory allocation fails
-  if (!buffer)
-    return NULL;
-
-  int c;
-  // read characters until EOF or newline
-  while ((c = fgetc(stdin)) != EOF && c != '\n')
-  {
-    // check if the buffer needs to be expanded
-    if (index >= buffer_size - 1)
-    {
-      buffer_size += INPUT_STRING_CHUNK_SIZE;
-      buffer = (char *)realloc(buffer, buffer_size * sizeof(char));
-      if (!buffer)
-      {
-        printf("Error: Memory allocation failed.\n");
-        exit(1);
-      }
-    }
-    // store the character in the buffer
-    buffer[index++] = (char)c;
-  }
-
-  // if EOF is encountered and no characters were read, free and return NULL
-  if (index == 0 && c == EOF)
-  {
-    free(buffer);
-    return NULL;
-  }
-
-  buffer[index] = '\0'; // Null-terminate the string
-
-  // reallocate memory to match the exact string length
-  buffer = (char *)realloc(buffer, (index + 1) * sizeof(char));
-  if (!buffer)
-  {
-    printf("Error: Memory allocation failed.\n");
-    exit(1);
-  }
-
-  return buffer; // return the final string
-}
-
-int input_int()
-{
-  char *buffer = input_string();
-  int value = atoi(buffer);
-  free(buffer);
-  return value;
-}
-
-double input_double()
-{
-  char *buffer = input_string();
-  double value = atof(buffer);
-  free(buffer);
-  return value;
-}
-
-char input_char()
-{
-  char *buffer = input_string();
-  char firstChar = buffer[0];
-  free(buffer);
-  return firstChar;
-}
-
-char *int_to_string(int value)
-{
-  int digit_counter = value;
-  int length = value < 0 ? 3 : 2;
-  while (digit_counter /= 10)
-    length++;
-  char *string = (char *)calloc(length, sizeof(char));
-  if (string == NULL)
-    return NULL;
-  sprintf(string, "%d", value);
-  string[length - 1] = '\0';
-  return string;
-}
-
-void print_tabs(int tab_depth, bool end_with_dash)
-{
-  if (end_with_dash)
-    while (tab_depth--)
-      printf(tab_depth ? "  " : "- ");
-  else
-    while (tab_depth--)
-      printf("  ");
-}
+#include "./interface.h"
 
 cJSON *input_cjson_with_model(DBModel *model, int tab_depth)
 {
@@ -124,10 +19,7 @@ cJSON *input_cjson_with_model(DBModel *model, int tab_depth)
     cJSON *created_object = cJSON_CreateObject();
 
     if (!created_object)
-    {
-      printf("Error: Failed to create object.\n");
-      return NULL;
-    }
+      memory_error_handler(__FILE__, __LINE__, __func__);
 
     int model_attributes_length = model->intvalue;
     DBModel *attribute_model = NULL;
@@ -153,10 +45,7 @@ cJSON *input_cjson_with_model(DBModel *model, int tab_depth)
     cJSON *created_array = cJSON_CreateArray();
 
     if (!created_array)
-    {
-      printf("Error: Failed to create object.\n");
-      return NULL;
-    }
+      memory_error_handler(__FILE__, __LINE__, __func__);
 
     // get array model properties
     DBModel *array_type = get_model_attr(model, DBModelAttr_ArrayTypeGetter);
@@ -383,7 +272,7 @@ cJSON *edit_cjson_with_model(DBModel *model, cJSON *json, int tab_depth)
       return json;
     }
 
-    case '3': // eidt
+    case '3': // edit
     {
       print_tabs(tab_depth, false);
       printf("Select an index (start from 1) to edit: ");
@@ -460,16 +349,26 @@ void print_person(DBItem *item)
   int tempArraySize = cJSON_GetArraySize(phoneNumbers);
   printf("%-16s: ", tempArraySize > 1 ? "Phone Numbers" : "Phone Number");
   for (int i = 0; i < tempArraySize; i++)
-    printf("%s%s", cJSON_GetArrayItem(phoneNumbers, i)->valuestring, i == tempArraySize - 1 ? "\n" : ", ");
+  {
+    printf("%s%s", cJSON_GetArrayItem(phoneNumbers, i)->valuestring);
+    if (i != tempArraySize - 1)
+      printf(", ");
+  }
+  printf("\n");
 
   cJSON *emailAddresses = cJSON_GetObjectItem(json, "emailAddresses");
   tempArraySize = cJSON_GetArraySize(emailAddresses);
   printf("%-16s: ", tempArraySize > 1 ? "Email Addresses" : "Email Address");
   for (int i = 0; i < tempArraySize; i++)
-    printf("%s%s", cJSON_GetArrayItem(emailAddresses, i)->valuestring, i == tempArraySize - 1 ? "\n" : ", ");
+  {
+    printf("%s%s", cJSON_GetArrayItem(emailAddresses, i)->valuestring);
+    if (i != tempArraySize - 1)
+      printf(", ");
+  }
+  printf("\n");
 
-  printf("%-16s: %s\n", "Married", (cJSON_GetObjectItem(json, "isMarried")->valueint) ? "YES" : "NO");
-  printf("%-16s: %s\n", "Employed", (cJSON_GetObjectItem(json, "isEmployed")->valueint) ? "YES" : "NO");
+  printf("%-16s: %s\n", "Married", (cJSON_IsTrue(cJSON_GetObjectItem(json, "isMarried"))) ? "YES" : "NO");
+  printf("%-16s: %s\n", "Employed", (cJSON_IsTrue(cJSON_GetObjectItem(json, "isEmployed"))) ? "YES" : "NO");
 
   printf("----------------------------------------------------------------\n");
 }
@@ -477,9 +376,9 @@ void print_person(DBItem *item)
 void create_person(DBModel *person_model)
 {
   cJSON *person_json = input_cjson_with_model(person_model, 0);
-  char *name = NULL;
+  char *name = cJSON_GetObjectItem(person_json, "name")->valuestring;
 
-  if (exists(cJSON_GetObjectItem(person_json, "name")->valuestring))
+  if (exists(name))
   {
     while (true)
     {
@@ -534,11 +433,8 @@ void update_person(DBModel *person_model)
   // record name before edit
   name_buffer = cJSON_GetObjectItem(item->json, "name")->valuestring;
   char *before_name = (char *)calloc(strlen(name_buffer), sizeof(char));
-  if (before_name == NULL)
-  {
-    printf("Error: Memory allocation failed.\n");
-    return;
-  }
+  if (!before_name)
+    memory_error_handler(__FILE__, __LINE__, __func__);
   strcpy(before_name, name_buffer);
 
   // edit cjson
@@ -578,6 +474,15 @@ void delete_person()
 
 void main_menu()
 {
+  // ################ Person Model ################
+  // name: <string>
+  // jobTitle: <string>
+  // age: <number>
+  // address: <string>
+  // phoneNumebrs: <string[]>
+  // emaildAddresses: <string[]>
+  // isMarried: <boolean>
+  // isEmployed: <boolean>
   DBModel *person_model = def_model(NULL, "Person", DBModelType_Object);
   def_model(person_model, "name", DBModelType_String);
   def_model(person_model, "jobTitle", DBModelType_String);
